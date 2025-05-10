@@ -10,7 +10,7 @@
     ```bash
     python -m venv .venv
     source .venv/bin/activate
-    pip install .
+    pip install -r requirements.txt
     ```
 
 ## 2. Annotation tool
@@ -21,5 +21,5 @@ uv run streamlit run tool/annotation.py
 uv run streamlit run tool/annotation.py -- -v VIDEO_DIR_PATH -l LABEL_CSV_PATH
 
 # without uv
-python tool/annotation.py -v VIDEO_DIR_PATH -l LABEL_CSV_PATH
+streamlit run tool/annotation.py -- -v VIDEO_DIR_PATH -l LABEL_CSV_PATH
 ```
