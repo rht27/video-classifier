@@ -39,7 +39,8 @@ def main():
             return
         video_names = [f.name for f in video_list]
         data_df = pd.DataFrame(video_names, columns=["video_name"])
-        data_df["label"] = math.nan
+        data_df["label_id"] = math.nan
+        data_df["label_name"] = None
 
     label_df = pd.read_csv(label_csv_path)
 
@@ -48,7 +49,7 @@ def main():
     label_options = [f"{r.id}. {r.name}" for r in label_df.itertuples()]
 
     for row in data_df.itertuples():
-        if math.isnan(row.label):
+        if math.isnan(row.label_id):
             break
 
     label = st.selectbox(
@@ -64,8 +65,12 @@ def main():
     st.video(video_bytes, loop=True, autoplay=True)
 
     if label:
-        id = int(label.split(".")[0])
-        data_df.at[row.Index, "label"] = id
+        id = label.split(".")[0]
+        name = label.replace(id, "")[1:]
+        id = int(id)
+        name = name[1:]
+        data_df.at[row.Index, "label_id"] = id
+        data_df.at[row.Index, "label_name"] = name
 
     st.button("OK", type="primary")
 
