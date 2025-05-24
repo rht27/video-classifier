@@ -29,18 +29,27 @@ def main():
 
     data_csv_path = root_dir_path / "data" / "csv" / "all.csv"
 
+    # check video files
+    video_names = [f.name for f in sorted(video_dir_path.glob("*.mp4"))]
+    if len(video_names) == 0:
+        st.write(f"There are no video files in {video_dir_path}")
+        return
+
     if data_csv_path.exists():
         data_df = pd.read_csv(data_csv_path)
     else:
         data_csv_path.parent.mkdir(exist_ok=True, parents=True)
-        video_list = sorted(video_dir_path.glob("*.mp4"))
-        if len(video_list) == 0:
-            st.write(f"There are no video files in {video_dir_path}")
-            return
-        video_names = [f.name for f in video_list]
         data_df = pd.DataFrame(video_names, columns=["video_name"])
         data_df["label_id"] = math.nan
         data_df["label_name"] = None
+
+    exist_video_names = data_df["video_name"].to_list()
+    new_video_names = list(set(video_names) - set(exist_video_names))
+    if len(new_video_names) > 0:
+        new_data_df = pd.DataFrame(new_video_names, columns=["video_name"])
+        new_data_df["label_id"] = math.nan
+        new_data_df["label_name"] = None
+        data_df = pd.concat([data_df, new_data_df])
 
     label_df = pd.read_csv(label_csv_path)
 
