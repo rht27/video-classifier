@@ -56,13 +56,19 @@ class FrameEncoder(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, num_classes: int) -> None:
+    def __init__(
+        self, num_classes: int, frame_num: int, use_senet: bool = True
+    ) -> None:
         super().__init__()
+
+        self.use_senet = use_senet
+
         self.enc1 = FrameEncoder()
         self.enc2 = FrameEncoder()
         self.enc3 = FrameEncoder()
 
-        self.se = SELayer(10)
+        if self.use_senet:
+            self.se = SELayer(10)
 
         self.flatten = nn.Flatten()
         self.linear1 = nn.Linear(480, 120)
@@ -74,15 +80,18 @@ class Model(nn.Module):
         roi2 = frames.get("roi2")
         roi3 = frames.get("roi3")
 
-        feat1 = self.enc1(roi1).squeeze()
-        feat2 = self.enc1(roi2).squeeze()
-        feat3 = self.enc1(roi3).squeeze()
+        feat1 = self.enc1(roi1).squeeze(dim=[3, 4])
+        feat2 = self.enc1(roi2).squeeze(dim=[3, 4])
+        feat3 = self.enc1(roi3).squeeze(dim=[3, 4])
 
         feat = torch.concat([feat1, feat2, feat3], dim=2)
 
-        masked_output, mask = self.se(feat)
+        if self.use_senet:
+            masked_feat, mask = self.se(feat)
+            feat = self.flatten(masked_feat)
+        else:
+            feat = self.flatten(feat)
 
-        feat = self.flatten(masked_output)
         feat = self.relu(self.linear1(feat))
         out = self.relu(self.linear2(feat))
 

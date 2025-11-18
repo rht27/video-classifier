@@ -20,11 +20,15 @@ from model import Model
 
 class VideoDataset(Dataset):
     def __init__(
-        self, df: pd.DataFrame, dataset_root_path: Path, is_train: bool = True
+        self,
+        df: pd.DataFrame,
+        dataset_root_path: Path,
+        extract_frame_num: int,
     ):
-        self.is_train = is_train
-        self.dataset_root_path = dataset_root_path
         self.df = df.reset_index(drop=True)
+        self.dataset_root_path = dataset_root_path
+        self.extract_frame_num = extract_frame_num
+
         self.index_to_data = self.df.to_dict(orient="index")
 
         size = (224, 224)
@@ -44,9 +48,9 @@ class VideoDataset(Dataset):
 
     def __getitem__(self, index) -> Any:
         data = self.index_to_data[index]
-        video_name, label = data.get("video_name"), data.get("label_id")
 
-        label = torch.tensor(label - 1, dtype=torch.int64)
+        video_name, label = data.get("video_name"), data.get("new_label_id")
+        label = torch.tensor(label, dtype=torch.int64)
 
         video_path = self.dataset_root_path / video_name
         assert video_path.exists(), f"{video_path} does not exist"
@@ -67,7 +71,9 @@ class CVVideoDataset(VideoDataset):
         cap = cv2.VideoCapture(str(video_path))
         frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
 
-        extract_frames = np.linspace(0, frame_count, 10, endpoint=False, dtype=int)
+        extract_frames = np.linspace(
+            0, frame_count, self.extract_frame_num, endpoint=False, dtype=int
+        )
 
         x0_1, x1_1, y0_1, y1_1 = self.roi_list[0]
         x0_2, x1_2, y0_2, y1_2 = self.roi_list[1]
@@ -123,7 +129,9 @@ class TorchVideoDataset(VideoDataset):
 
         frame_count = len(decoder)
 
-        extract_frames = np.linspace(0, frame_count, 10, endpoint=False, dtype=int)
+        extract_frames = np.linspace(
+            0, frame_count, self.extract_frame_num, endpoint=False, dtype=int
+        )
 
         x0_1, x1_1, y0_1, y1_1 = self.roi_list[0]
         x0_2, x1_2, y0_2, y1_2 = self.roi_list[1]
@@ -148,7 +156,7 @@ class TorchVideoDataset(VideoDataset):
 def train(dataloader, model, loss_fn, optimizer):
     size = len(dataloader.dataset)
     model.train()
-    with tqdm(dataloader) as train_pbar:
+    with tqdm(dataloader, dynamic_ncols=True) as train_pbar:
         for batch, (data, label) in enumerate(train_pbar):
             # data = data.to(device)
             # label = label.to(device)
@@ -173,7 +181,7 @@ def valid(dataloader, model, loss_fn):
     model.eval()
     valid_loss, correct = 0, 0
     with torch.no_grad():
-        for data, label in dataloader:
+        for data, label in tqdm(dataloader, dynamic_ncols=True, postfix="Valid"):
             pred = model(data)
             valid_loss += loss_fn(pred, label).item()
             correct += (pred.argmax(1) == label).type(torch.float).sum().item()
@@ -186,21 +194,51 @@ def valid(dataloader, model, loss_fn):
 
 
 def main():
-    dataset_root_path = Path(__file__).parent / "data" / "video"
-    dataset_csv_path = Path(__file__).parent / "data" / "csv" / "all.csv"
+    data_root_path = Path(__file__).parent / "data"
+    dataset_root_path = data_root_path / "video"
+    dataset_csv_path = data_root_path / "csv" / "all.csv"
 
-    seed = 42
+    seed: int = 42
+    batch_size: int = 2
+    epochs: int = 10
+    extract_frame_num: int = 10
+    use_weighted_random_sampler: bool = True
 
     dataset_df = pd.read_csv(dataset_csv_path)
-    dataset_df = dataset_df.dropna().head(400).sample(100, random_state=seed)
+    dataset_df = dataset_df.dropna()
+    dataset_df["label_id"] = dataset_df["label_id"].astype("int")
+
+    label_counts = dataset_df["label_id"].value_counts().to_dict()
+    label_num = len(label_counts)
+    old_id_to_new_id = {}
+    dataset_df["new_label_id"] = dataset_df["label_id"]
+    offset = 1000
+    for i, (id, count) in enumerate(label_counts.items()):
+        new_id = offset + i
+        dataset_df = dataset_df.replace({"new_label_id": {id: new_id}})
+        old_id_to_new_id[id] = i
+    dataset_df["new_label_id"] -= offset
+
+    # dataset_df = dataset_df.dropna().head(400).sample(100, random_state=seed)
+    dataset_df = dataset_df.query("new_label_id == 2 or new_label_id == 3")
+    # dataset_df = dataset_df[dataset_df["new_label_id"] == 0]
 
     train_df, valid_df = train_test_split(dataset_df, test_size=0.2, random_state=seed)
 
-    batch_size = 2
-    epochs = 10
+    if use_weighted_random_sampler:
+        class_counts = np.array(list(label_counts.values()), dtype=np.float32)
+        class_weghts = 1.0 / class_counts
+        sample_weights = [
+            class_weghts[int(row.new_label_id)] for row in train_df.itertuples()
+        ]
+        sampler = WeightedRandomSampler(
+            weights=sample_weights, num_samples=len(train_df), replacement=True
+        )
+    else:
+        sampler = None
 
     device = (
-        "cuda"
+        "cuda:0"
         if torch.cuda.is_available()
         else "mps"
         if torch.backends.mps.is_available()
@@ -209,16 +247,21 @@ def main():
     print(f"Using {device} device")
 
     if sys.platform == "win32":
-        train_dataset = CVVideoDataset(train_df, dataset_root_path)
-        valid_dataset = CVVideoDataset(valid_df, dataset_root_path)
+        train_dataset = CVVideoDataset(train_df, dataset_root_path, extract_frame_num)
+        valid_dataset = CVVideoDataset(valid_df, dataset_root_path, extract_frame_num)
     else:
-        train_dataset = TorchVideoDataset(train_df, dataset_root_path)
-        valid_dataset = TorchVideoDataset(valid_df, dataset_root_path)
+        train_dataset = TorchVideoDataset(
+            train_df, dataset_root_path, extract_frame_num
+        )
+        valid_dataset = TorchVideoDataset(
+            valid_df, dataset_root_path, extract_frame_num
+        )
 
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
+        sampler=sampler,
         drop_last=True,
         num_workers=0,
     )
@@ -230,9 +273,9 @@ def main():
         num_workers=0,
     )
 
-    model = Model(num_classes=146)
+    model = Model(num_classes=label_num, frame_num=extract_frame_num, use_senet=True)
     model = model.to(device)
-    print(model)
+    # print(model)
 
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-3)
