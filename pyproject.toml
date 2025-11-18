@@ -8,11 +8,11 @@ dependencies = [
     "pandas>=2.2.3",
     "torch>=2.7.0",
     "torchvision>=0.22.0",
-    "torchcodec>=0.3 ; sys_platform != 'win32'",
     "scikit-learn>=1.6.1",
     "streamlit>=1.45.0",
     "tqdm>=4.67.1",
     "opencv-python>=4.11.0.86 ; sys_platform == 'win32'",
+    "torchcodec>=0.7.0",
 ]
 
 [tool.uv.sources]
@@ -51,4 +51,13 @@ select = [
     "N",
     "SIM",
     "W",
+]
+unfixable = [
+    "F401",
+    "F841",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.1",
 ]
